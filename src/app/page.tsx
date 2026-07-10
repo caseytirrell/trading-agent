@@ -1,65 +1,271 @@
-import Image from "next/image";
+import {
+  getAlpacaAccount,
+  getAlpacaPositions,
+  getLatestStockTrades,
+  getAlpacaOrders,
+} from "@/lib/alpaca";
+import { getOpenAITradeRecommendation } from "@/lib/openai-trader";
+import { runRiskCheck } from "@/lib/risk-manager";
 
-export default function Home() {
+export default async function Home() {
+  const [account, positions, latestTrades, orders, recommendation] =
+  await Promise.all([
+    getAlpacaAccount(),
+    getAlpacaPositions(),
+    getLatestStockTrades(["SPY", "QQQ", "AAPL", "MSFT", "NVDA"]),
+    getAlpacaOrders(),
+    getOpenAITradeRecommendation(),
+  ]);
+
+const riskCheck =
+  recommendation.action === "HOLD" || recommendation.action === "NO_TRADE"
+    ? {
+        approved: false,
+        reasons: ["OpenAI recommended no executable trade."],
+      }
+    : runRiskCheck({
+        symbol: recommendation.symbol,
+        qty: recommendation.qty,
+        side: recommendation.action === "BUY" ? "buy" : "sell",
+      });
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <main className="min-h-screen bg-neutral-950 p-8 text-white">
+      <div className="mx-auto max-w-4xl">
+        <p className="mb-2 text-sm uppercase tracking-wide text-green-400">
+          Claude Trading Agent
+        </p>
+
+        <h1 className="mb-8 text-4xl font-bold">
+          Paper Trading Dashboard
+        </h1>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="rounded-2xl border border-neutral-800 bg-neutral-900 p-6">
+            <p className="text-sm text-neutral-400">Account Status</p>
+            <p className="mt-2 text-2xl font-semibold">{account.status}</p>
+          </div>
+
+          <div className="rounded-2xl border border-neutral-800 bg-neutral-900 p-6">
+            <p className="text-sm text-neutral-400">Environment</p>
+            <p className="mt-2 text-2xl font-semibold">
+              {account.paper ? "Paper Trading" : "Live Trading"}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-neutral-800 bg-neutral-900 p-6">
+            <p className="text-sm text-neutral-400">Portfolio Value</p>
+            <p className="mt-2 text-2xl font-semibold">
+              ${Number(account.portfolioValue).toLocaleString()}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-neutral-800 bg-neutral-900 p-6">
+            <p className="text-sm text-neutral-400">Buying Power</p>
+            <p className="mt-2 text-2xl font-semibold">
+              ${Number(account.buyingPower).toLocaleString()}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-8 rounded-2xl border border-green-900 bg-green-950/40 p-6">
+          <p className="font-semibold text-green-300">
+            Safety Check
+          </p>
+          <div className="mt-8 rounded-2xl border border-neutral-800 bg-neutral-900 p-6">
+            <div className="mb-4 flex items-center justify-between gap-4">
+              <div>
+                <p className="text-sm uppercase tracking-wide text-blue-400">
+                  AI Recommendation
+                </p>
+                <h2 className="text-2xl font-bold">OpenAI Trade Idea</h2>
+              </div>
+
+              <span
+                className={`rounded-full px-4 py-2 text-sm font-semibold ${
+                  recommendation.action === "BUY"
+                    ? "bg-green-950 text-green-300"
+                    : recommendation.action === "SELL"
+                      ? "bg-red-950 text-red-300"
+                      : "bg-neutral-800 text-neutral-300"
+                }`}
+              >
+                {recommendation.action}
+              </span>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-4">
+              <div>
+                <p className="text-sm text-neutral-400">Symbol</p>
+                <p className="mt-1 text-xl font-semibold">{recommendation.symbol}</p>
+              </div>
+
+              <div>
+                <p className="text-sm text-neutral-400">Qty</p>
+                <p className="mt-1 text-xl font-semibold">{recommendation.qty}</p>
+              </div>
+
+              <div>
+                <p className="text-sm text-neutral-400">Confidence</p>
+                <p className="mt-1 text-xl font-semibold">
+                  {Math.round(recommendation.confidence * 100)}%
+                </p>
+              </div>
+
+              <div>
+                <p className="text-sm text-neutral-400">Executable</p>
+                <p className="mt-1 text-xl font-semibold">
+                  {riskCheck.approved ? "Yes" : "No"}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6">
+              <p className="text-sm text-neutral-400">Reason</p>
+              <p className="mt-2 text-neutral-200">{recommendation.reason}</p>
+            </div>
+
+            {!riskCheck.approved && (
+              <div className="mt-6 rounded-xl border border-yellow-900 bg-yellow-950/40 p-4">
+                <p className="font-semibold text-yellow-300">
+                  Not executable
+                </p>
+                <ul className="mt-2 list-inside list-disc text-sm text-neutral-300">
+                  {riskCheck.reasons.map((reason) => (
+                    <li key={reason}>{reason}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+          <div className="mt-8 rounded-2xl border border-neutral-800 bg-neutral-900 p-6">
+            <h2 className="mb-4 text-2xl font-bold">Current Positions</h2>
+
+            {positions.length === 0 ? (
+              <p className="text-neutral-400">
+                No current paper positions yet.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="border-b border-neutral-800 text-neutral-400">
+                    <tr>
+                      <th className="py-3">Symbol</th>
+                      <th className="py-3">Qty</th>
+                      <th className="py-3">Market Value</th>
+                      <th className="py-3">Avg Entry</th>
+                      <th className="py-3">Current Price</th>
+                      <th className="py-3">Unrealized P/L</th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {positions.map((position) => (
+                      <tr key={position.symbol} className="border-b border-neutral-800">
+                        <td className="py-3 font-semibold">{position.symbol}</td>
+                        <td className="py-3">{position.qty}</td>
+                        <td className="py-3">
+                          ${Number(position.marketValue).toLocaleString()}
+                        </td>
+                        <td className="py-3">
+                          ${Number(position.avgEntryPrice).toLocaleString()}
+                        </td>
+                        <td className="py-3">
+                          ${Number(position.currentPrice).toLocaleString()}
+                        </td>
+                        <td className="py-3">
+                          ${Number(position.unrealizedPl).toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+          <div className="mt-8 rounded-2xl border border-neutral-800 bg-neutral-900 p-6">
+            <h2 className="mb-4 text-2xl font-bold">Market Watch</h2>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="border-b border-neutral-800 text-neutral-400">
+                  <tr>
+                    <th className="py-3">Symbol</th>
+                    <th className="py-3">Latest Price</th>
+                    <th className="py-3">Last Trade Size</th>
+                    <th className="py-3">Timestamp</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {latestTrades.map((trade) => (
+                    <tr key={trade.symbol} className="border-b border-neutral-800">
+                      <td className="py-3 font-semibold">{trade.symbol}</td>
+                      <td className="py-3">
+                        ${trade.price.toLocaleString()}
+                      </td>
+                      <td className="py-3">{trade.size}</td>
+                      <td className="py-3 text-neutral-400">
+                        {trade.timestamp
+                          ? new Date(trade.timestamp).toLocaleString()
+                          : "Unavailable"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div className="mt-8 rounded-2xl border border-neutral-800 bg-neutral-900 p-6">
+            <h2 className="mb-4 text-2xl font-bold">Recent Orders</h2>
+
+            {orders.length === 0 ? (
+              <p className="text-neutral-400">No recent paper orders yet.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="border-b border-neutral-800 text-neutral-400">
+                    <tr>
+                      <th className="py-3">Symbol</th>
+                      <th className="py-3">Side</th>
+                      <th className="py-3">Qty</th>
+                      <th className="py-3">Status</th>
+                      <th className="py-3">Filled Price</th>
+                      <th className="py-3">Submitted</th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {orders.map((order) => (
+                      <tr key={order.id} className="border-b border-neutral-800">
+                        <td className="py-3 font-semibold">{order.symbol}</td>
+                        <td className="py-3 uppercase">{order.side}</td>
+                        <td className="py-3">{order.qty}</td>
+                        <td className="py-3">{order.status}</td>
+                        <td className="py-3">
+                          {order.filledAvgPrice
+                            ? `$${Number(order.filledAvgPrice).toLocaleString()}`
+                            : "Not filled"}
+                        </td>
+                        <td className="py-3 text-neutral-400">
+                          {new Date(order.submittedAt).toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+          <p className="mt-2 text-neutral-300">
+            This app is currently connected to{" "}
+            <strong>
+              {account.paper ? "paper trading" : "live trading"}
+            </strong>
+            .
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+      </div>
+    </main>
   );
 }
