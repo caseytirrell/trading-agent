@@ -1,0 +1,339 @@
+// Prisma schema for the trading-agent-paper Neon Postgres database.
+//
+// IMPORTANT: the database schema is managed MANUALLY (tables were created in
+// the Neon SQL Editor). This file maps the existing snake_case tables exactly
+// and must never be used to create, drop, or alter them:
+//   - Do NOT run `prisma migrate dev` or `prisma db push`.
+//   - There are intentionally no migration files; there is nothing to
+//     baseline because Prisma never owns this schema.
+//   - To verify the mapping matches the live database, run:
+//       npx prisma migrate diff --from-url "$DIRECT_URL" \
+//         --to-schema-datamodel prisma/schema.prisma --exit-code
+//     (an empty diff means the mapping is exact).
+//
+// DATABASE_URL is the pooled Neon connection string (runtime queries);
+// DIRECT_URL is the direct connection string (introspection/diff tooling).
+// Both are server-side secrets in .env.local — never NEXT_PUBLIC_.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model AgentRun {
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  runType              String    @map("run_type")
+  triggerSource        String    @map("trigger_source")
+  status               String
+  startedAt            DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  completedAt          DateTime? @map("completed_at") @db.Timestamptz(6)
+  intendedSessionDate  DateTime? @map("intended_session_date") @db.Date
+  analysisOnly         Boolean   @default(false) @map("analysis_only")
+  ordersSubmittedCount Int       @default(0) @map("orders_submitted_count")
+  ordersQueuedCount    Int       @default(0) @map("orders_queued_count")
+  killSwitchActive     Boolean?  @map("kill_switch_active")
+  paperTrading         Boolean?  @map("paper_trading")
+  skippedReason        String?   @map("skipped_reason")
+  errorMessage         String?   @map("error_message")
+  inputSnapshot        Json      @default("{}") @map("input_snapshot")
+  outputSnapshot       Json      @default("{}") @map("output_snapshot")
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  aiRecommendations       AiRecommendation[]
+  marketAnalyses          MarketAnalysis[]
+  riskDecisions           RiskDecision[]
+  eveningAnalysisReports  EveningAnalysisReport[]
+  watchlistRevalidations  WatchlistRevalidation[]
+  alpacaOrderRefs         AlpacaOrderRef[]
+  scheduledJobRuns        ScheduledJobRun[]
+  notifications           Notification[]
+  errorEvents             ErrorEvent[]
+
+  @@index([runType, createdAt(sort: Desc)], map: "idx_agent_runs_run_type_created_at")
+  @@index([status, createdAt(sort: Desc)], map: "idx_agent_runs_status_created_at")
+  @@map("agent_runs")
+}
+
+model AiRecommendation {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  agentRunId       String?  @map("agent_run_id") @db.Uuid
+  provider         String   @default("openai")
+  model            String?
+  action           String
+  symbol           String?
+  qty              Decimal? @db.Decimal(18, 8)
+  confidence       Decimal? @db.Decimal(5, 4)
+  reason           String
+  rawResponse      Json     @default("{}") @map("raw_response")
+  validatedPayload Json     @default("{}") @map("validated_payload")
+  validationNotes  Json     @default("[]") @map("validation_notes")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  agentRun      AgentRun?      @relation(fields: [agentRunId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  riskDecisions RiskDecision[]
+
+  @@index([agentRunId], map: "idx_ai_recommendations_agent_run_id")
+  @@map("ai_recommendations")
+}
+
+model MarketAnalysis {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  agentRunId    String?  @map("agent_run_id") @db.Uuid
+  analysisKind  String   @map("analysis_kind")
+  asOf          DateTime @map("as_of") @db.Timestamptz(6)
+  marketRegime  String   @map("market_regime")
+  regimeReasons Json     @default("[]") @map("regime_reasons")
+  forceNoTrade  Boolean  @default(false) @map("force_no_trade")
+  dataIssues    Json     @default("[]") @map("data_issues")
+  minBuyScore   Int?     @map("min_buy_score")
+  summary       Json     @default("{}")
+  candidates    Json     @default("[]")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  agentRun                AgentRun?               @relation(fields: [agentRunId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  eveningAnalysisReports  EveningAnalysisReport[]
+
+  @@index([agentRunId], map: "idx_market_analyses_agent_run_id")
+  @@map("market_analyses")
+}
+
+model RiskDecision {
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  agentRunId           String?  @map("agent_run_id") @db.Uuid
+  recommendationId     String?  @map("recommendation_id") @db.Uuid
+  decisionType         String   @map("decision_type")
+  approved             Boolean
+  reasons              Json     @default("[]")
+  tradeSymbol          String?  @map("trade_symbol")
+  tradeQty             Decimal? @map("trade_qty") @db.Decimal(18, 8)
+  tradeSide            String?  @map("trade_side")
+  accountSnapshot      Json     @default("{}") @map("account_snapshot")
+  positionsSnapshot    Json     @default("[]") @map("positions_snapshot")
+  recentOrdersSnapshot Json     @default("[]") @map("recent_orders_snapshot")
+  marketClockSnapshot  Json     @default("{}") @map("market_clock_snapshot")
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  agentRun               AgentRun?               @relation(fields: [agentRunId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  recommendation         AiRecommendation?       @relation(fields: [recommendationId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  watchlistRevalidations WatchlistRevalidation[]
+  alpacaOrderRefs        AlpacaOrderRef[]
+
+  @@index([agentRunId], map: "idx_risk_decisions_agent_run_id")
+  @@map("risk_decisions")
+}
+
+model EveningAnalysisReport {
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  agentRunId           String?   @map("agent_run_id") @db.Uuid
+  generatedAt          DateTime  @map("generated_at") @db.Timestamptz(6)
+  intendedSessionDate  DateTime? @map("intended_session_date") @db.Date
+  expiresAt            DateTime? @map("expires_at") @db.Timestamptz(6)
+  expiredAt            DateTime? @map("expired_at") @db.Timestamptz(6)
+  status               String    @default("active")
+  analysisOnly         Boolean   @default(true) @map("analysis_only")
+  ordersSubmittedCount Int       @default(0) @map("orders_submitted_count")
+  ordersQueuedCount    Int       @default(0) @map("orders_queued_count")
+  safetyNotice         String    @map("safety_notice")
+  marketStatus         String    @map("market_status")
+  marketStatusLabel    String?   @map("market_status_label")
+  marketRegime         String    @map("market_regime")
+  regimeReasons        Json      @default("[]") @map("regime_reasons")
+  selectionNotice      String?   @map("selection_notice")
+  summary              String?
+  warnings             Json      @default("[]")
+  marketAnalysisId     String?   @map("market_analysis_id") @db.Uuid
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  agentRun       AgentRun?                  @relation(fields: [agentRunId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  marketAnalysis MarketAnalysis?            @relation(fields: [marketAnalysisId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  candidates     EveningAnalysisCandidate[]
+
+  @@index([intendedSessionDate, status], map: "idx_evening_reports_session_status")
+  @@map("evening_analysis_reports")
+}
+
+model EveningAnalysisCandidate {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  reportId              String   @map("report_id") @db.Uuid
+  symbol                String
+  action                String
+  status                String
+  rank                  Int
+  confidence            Decimal  @default(0) @db.Decimal(5, 4)
+  deterministicScore    Int      @map("deterministic_score")
+  scoreComponents       Json     @default("{}") @map("score_components")
+  scoreThreshold        Int      @map("score_threshold")
+  passedScoreThreshold  Boolean  @map("passed_score_threshold")
+  eligibleForNewBuy     Boolean  @map("eligible_for_new_buy")
+  inclusionType         String   @map("inclusion_type")
+  inclusionReason       String   @map("inclusion_reason")
+  blockingReasons       Json     @default("[]") @map("blocking_reasons")
+  thesis                String
+  supportingFactors     Json     @default("[]") @map("supporting_factors")
+  riskFactors           Json     @default("[]") @map("risk_factors")
+  invalidationConditions Json    @default("[]") @map("invalidation_conditions")
+  proposedEntryRange    String?  @map("proposed_entry_range")
+  maximumEntryPrice     Decimal? @map("maximum_entry_price") @db.Decimal(18, 8)
+  currentReferencePrice Decimal? @map("current_reference_price") @db.Decimal(18, 8)
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  report                 EveningAnalysisReport   @relation(fields: [reportId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  watchlistRevalidations WatchlistRevalidation[]
+  alpacaOrderRefs        AlpacaOrderRef[]
+
+  @@unique([reportId, symbol])
+  @@index([reportId, rank], map: "idx_evening_candidates_report_rank")
+  @@map("evening_analysis_candidates")
+}
+
+model WatchlistRevalidation {
+  id                      String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  eveningCandidateId      String?   @map("evening_candidate_id") @db.Uuid
+  agentRunId              String?   @map("agent_run_id") @db.Uuid
+  outcome                 String
+  revalidatedAt           DateTime  @default(now()) @map("revalidated_at") @db.Timestamptz(6)
+  currentPrice            Decimal?  @map("current_price") @db.Decimal(18, 8)
+  approvedSymbol          Boolean   @default(false) @map("approved_symbol")
+  entryRangePassed        Boolean?  @map("entry_range_passed")
+  maximumEntryPricePassed Boolean?  @map("maximum_entry_price_passed")
+  invalidationPassed      Boolean?  @map("invalidation_passed")
+  dataFreshnessPassed     Boolean?  @map("data_freshness_passed")
+  riskDecisionId          String?   @map("risk_decision_id") @db.Uuid
+  details                 Json      @default("{}")
+  createdAt               DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  eveningCandidate EveningAnalysisCandidate? @relation(fields: [eveningCandidateId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  agentRun         AgentRun?                 @relation(fields: [agentRunId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  riskDecision     RiskDecision?             @relation(fields: [riskDecisionId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([eveningCandidateId, revalidatedAt(sort: Desc)], map: "idx_revalidations_candidate")
+  @@map("watchlist_revalidations")
+}
+
+model AlpacaOrderRef {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  agentRunId         String?   @map("agent_run_id") @db.Uuid
+  riskDecisionId     String?   @map("risk_decision_id") @db.Uuid
+  eveningCandidateId String?   @map("evening_candidate_id") @db.Uuid
+  alpacaOrderId      String    @unique @map("alpaca_order_id")
+  clientOrderId      String?   @map("client_order_id")
+  symbol             String
+  qty                Decimal   @db.Decimal(18, 8)
+  side               String
+  orderType          String    @map("order_type")
+  timeInForce        String    @map("time_in_force")
+  status             String
+  submittedAt        DateTime? @map("submitted_at") @db.Timestamptz(6)
+  filledAt           DateTime? @map("filled_at") @db.Timestamptz(6)
+  filledQty          Decimal?  @map("filled_qty") @db.Decimal(18, 8)
+  filledAvgPrice     Decimal?  @map("filled_avg_price") @db.Decimal(18, 8)
+  canceledAt         DateTime? @map("canceled_at") @db.Timestamptz(6)
+  expiredAt          DateTime? @map("expired_at") @db.Timestamptz(6)
+  failedAt           DateTime? @map("failed_at") @db.Timestamptz(6)
+  rawOrder           Json      @default("{}") @map("raw_order")
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  agentRun         AgentRun?                 @relation(fields: [agentRunId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  riskDecision     RiskDecision?             @relation(fields: [riskDecisionId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  eveningCandidate EveningAnalysisCandidate? @relation(fields: [eveningCandidateId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([symbol, createdAt(sort: Desc)], map: "idx_alpaca_order_refs_symbol_created_at")
+  @@map("alpaca_order_refs")
+}
+
+model ScheduledJobRun {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  jobName      String    @map("job_name")
+  status       String
+  scheduledFor DateTime? @map("scheduled_for") @db.Timestamptz(6)
+  startedAt    DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  completedAt  DateTime? @map("completed_at") @db.Timestamptz(6)
+  attempt      Int       @default(1)
+  maxAttempts  Int       @default(1) @map("max_attempts")
+  lockKey      String?   @map("lock_key")
+  lockedUntil  DateTime? @map("locked_until") @db.Timestamptz(6)
+  agentRunId   String?   @map("agent_run_id") @db.Uuid
+  errorMessage String?   @map("error_message")
+  metadata     Json      @default("{}")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  agentRun      AgentRun?      @relation(fields: [agentRunId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  notifications Notification[]
+  errorEvents   ErrorEvent[]
+
+  @@index([jobName, status, createdAt(sort: Desc)], map: "idx_scheduled_job_runs_job_status")
+  @@map("scheduled_job_runs")
+}
+
+model Notification {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  agentRunId        String?   @map("agent_run_id") @db.Uuid
+  scheduledJobRunId String?   @map("scheduled_job_run_id") @db.Uuid
+  notificationType  String    @map("notification_type")
+  channel           String
+  recipient         String?
+  status            String
+  subject           String?
+  body              String?
+  dedupeKey         String?   @map("dedupe_key")
+  provider          String?
+  providerMessageId String?   @map("provider_message_id")
+  attemptCount      Int       @default(0) @map("attempt_count")
+  lastAttemptAt     DateTime? @map("last_attempt_at") @db.Timestamptz(6)
+  sentAt            DateTime? @map("sent_at") @db.Timestamptz(6)
+  errorMessage      String?   @map("error_message")
+  metadata          Json      @default("{}")
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  agentRun        AgentRun?        @relation(fields: [agentRunId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  scheduledJobRun ScheduledJobRun? @relation(fields: [scheduledJobRunId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@map("notifications")
+}
+
+model AppSetting {
+  key         String   @id
+  value       Json
+  description String?
+  updatedBy   String?  @map("updated_by")
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("app_settings")
+}
+
+model SettingsAuditLog {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  settingKey   String   @map("setting_key")
+  oldValue     Json?    @map("old_value")
+  newValue     Json     @map("new_value")
+  changedBy    String?  @map("changed_by")
+  changeReason String?  @map("change_reason")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([settingKey, createdAt(sort: Desc)], map: "idx_settings_audit_logs_setting_key")
+  @@map("settings_audit_logs")
+}
+
+model ErrorEvent {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  agentRunId        String?  @map("agent_run_id") @db.Uuid
+  scheduledJobRunId String?  @map("scheduled_job_run_id") @db.Uuid
+  source            String
+  severity          String   @default("error")
+  message           String
+  details           Json     @default("{}")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  agentRun        AgentRun?        @relation(fields: [agentRunId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  scheduledJobRun ScheduledJobRun? @relation(fields: [scheduledJobRunId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([source, createdAt(sort: Desc)], map: "idx_error_events_source_created_at")
+  @@map("error_events")
+}

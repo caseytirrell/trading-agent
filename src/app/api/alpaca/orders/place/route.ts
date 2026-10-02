@@ -1,8 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { placePaperMarketOrder } from "@/lib/alpaca";
-import { runRiskCheck } from "@/lib/risk-manager";
+import {
+  getAlpacaAccount,
+  getAlpacaClock,
+  getAlpacaOrders,
+  getAlpacaPositions,
+  placePaperMarketOrder,
+} from "@/lib/alpaca";
+import { runRiskCheck, type TradeSide } from "@/lib/risk-manager";
+import { tryAcquireOrderExecutionLease } from "@/lib/order-execution-guard";
 
 export async function POST(request: NextRequest) {
+  let releaseOrderExecution: (() => void) | null = null;
+
   try {
     const body = await request.json();
 
@@ -23,10 +32,37 @@ export async function POST(request: NextRequest) {
     const tradeRequest = {
       symbol,
       qty,
-      side,
+      side: side as TradeSide,
     };
 
-    const riskCheck = runRiskCheck(tradeRequest);
+    const lease = tryAcquireOrderExecutionLease();
+
+    if (!lease) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Another order-capable request is already running.",
+        },
+        { status: 409 }
+      );
+    }
+
+    releaseOrderExecution = lease.release;
+
+    const [account, positions, recentOrders, marketClock] = await Promise.all([
+      getAlpacaAccount(),
+      getAlpacaPositions(),
+      getAlpacaOrders(),
+      getAlpacaClock(),
+    ]);
+
+    const riskCheck = runRiskCheck({
+      trade: tradeRequest,
+      account,
+      positions,
+      recentOrders,
+      marketClock,
+    });
 
     if (!riskCheck.approved) {
       return NextResponse.json(
@@ -44,7 +80,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: "Paper order submitted after passing risk check.",
+      message: order.deduplicated
+        ? "Duplicate submission prevented; returning the existing paper order."
+        : "Paper order submitted after passing risk check.",
       riskCheck,
       order,
     });
@@ -56,5 +94,7 @@ export async function POST(request: NextRequest) {
       },
       { status: 500 }
     );
+  } finally {
+    releaseOrderExecution?.();
   }
 }

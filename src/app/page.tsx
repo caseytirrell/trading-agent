@@ -4,43 +4,43 @@ import {
   getLatestStockTrades,
   getAlpacaOrders,
 } from "@/lib/alpaca";
-import { getOpenAITradeRecommendation } from "@/lib/openai-trader";
-import { runRiskCheck } from "@/lib/risk-manager";
+import AiRecommendationCard from "@/components/AiRecommendationCard";
+import AutonomousAgentCard from "@/components/AutonomousAgentCard";
+import DashboardRefreshButton from "@/components/DashboardRefreshButton";
+import EveningAnalysisCard from "@/components/EveningAnalysisCard";
+import { APPROVED_SYMBOLS } from "@/lib/trading-universe";
+
+export const dynamic = "force-dynamic";
+
+function formatDateTime(value: string | null): string {
+  return value ? new Date(value).toLocaleString() : "N/A";
+}
 
 export default async function Home() {
-  const [account, positions, latestTrades, orders, recommendation] =
-  await Promise.all([
+  const [account, positions, latestTrades, orders] = await Promise.all([
     getAlpacaAccount(),
     getAlpacaPositions(),
-    getLatestStockTrades(["SPY", "QQQ", "AAPL", "MSFT", "NVDA"]),
+    getLatestStockTrades([...APPROVED_SYMBOLS]),
     getAlpacaOrders(),
-    getOpenAITradeRecommendation(),
   ]);
-
-const riskCheck =
-  recommendation.action === "HOLD" || recommendation.action === "NO_TRADE"
-    ? {
-        approved: false,
-        reasons: ["OpenAI recommended no executable trade."],
-      }
-    : runRiskCheck({
-        symbol: recommendation.symbol,
-        qty: recommendation.qty,
-        side: recommendation.action === "BUY" ? "buy" : "sell",
-      });
 
   return (
     <main className="min-h-screen bg-neutral-950 p-8 text-white">
-      <div className="mx-auto max-w-4xl">
-        <p className="mb-2 text-sm uppercase tracking-wide text-green-400">
-          Claude Trading Agent
-        </p>
+      <div className="mx-auto max-w-7xl">
+        {/* Header */}
+        <div className="mb-8 flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
+          <div>
+            <p className="mb-2 text-sm uppercase tracking-wide text-green-400">
+              Claude Trading Agent
+            </p>
+            <h1 className="text-4xl font-bold">Paper Trading Dashboard</h1>
+          </div>
 
-        <h1 className="mb-8 text-4xl font-bold">
-          Paper Trading Dashboard
-        </h1>
+          <DashboardRefreshButton />
+        </div>
 
-        <div className="grid gap-4 md:grid-cols-2">
+        {/* Account summary cards */}
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-2xl border border-neutral-800 bg-neutral-900 p-6">
             <p className="text-sm text-neutral-400">Account Status</p>
             <p className="mt-2 text-2xl font-semibold">{account.status}</p>
@@ -68,87 +68,58 @@ const riskCheck =
           </div>
         </div>
 
-        <div className="mt-8 rounded-2xl border border-green-900 bg-green-950/40 p-6">
-          <p className="font-semibold text-green-300">
+        {/* Safety check */}
+        <section
+          className={`mt-8 rounded-2xl border p-6 ${
+            account.paper
+              ? "border-green-900 bg-green-950/40"
+              : "border-red-900 bg-red-950/40"
+          }`}
+        >
+          <p
+            className={`font-semibold ${
+              account.paper ? "text-green-300" : "text-red-300"
+            }`}
+          >
             Safety Check
           </p>
-          <div className="mt-8 rounded-2xl border border-neutral-800 bg-neutral-900 p-6">
-            <div className="mb-4 flex items-center justify-between gap-4">
-              <div>
-                <p className="text-sm uppercase tracking-wide text-blue-400">
-                  AI Recommendation
-                </p>
-                <h2 className="text-2xl font-bold">OpenAI Trade Idea</h2>
-              </div>
+          <p className="mt-2 text-neutral-300">
+            This app is currently connected to{" "}
+            <strong>{account.paper ? "paper trading" : "live trading"}</strong>.
+            The AI only recommends trades. Orders can be submitted only by
+            guarded server routes, and every order must pass the local risk
+            manager before reaching Alpaca paper trading.
+          </p>
+        </section>
 
-              <span
-                className={`rounded-full px-4 py-2 text-sm font-semibold ${
-                  recommendation.action === "BUY"
-                    ? "bg-green-950 text-green-300"
-                    : recommendation.action === "SELL"
-                      ? "bg-red-950 text-red-300"
-                      : "bg-neutral-800 text-neutral-300"
-                }`}
-              >
-                {recommendation.action}
-              </span>
-            </div>
+        {/* Interactive cards — two columns on large screens to cut scrolling.
+            Default grid alignment stretches each card to its row's height,
+            so side-by-side cards are always equal in length. */}
+        <div className="mt-8 grid gap-6 lg:grid-cols-2">
+          {/* AI recommendation (client component, only calls OpenAI on click) */}
+          <AiRecommendationCard />
 
-            <div className="grid gap-4 md:grid-cols-4">
-              <div>
-                <p className="text-sm text-neutral-400">Symbol</p>
-                <p className="mt-1 text-xl font-semibold">{recommendation.symbol}</p>
-              </div>
+          {/* Evening analysis (client component, manual read-only watchlist —
+              it can never place or queue orders) */}
+          <EveningAnalysisCard />
 
-              <div>
-                <p className="text-sm text-neutral-400">Qty</p>
-                <p className="mt-1 text-xl font-semibold">{recommendation.qty}</p>
-              </div>
+          {/* Autonomous agent (client component, only calls /api/agent/run) */}
+          <AutonomousAgentCard />
+        </div>
 
-              <div>
-                <p className="text-sm text-neutral-400">Confidence</p>
-                <p className="mt-1 text-xl font-semibold">
-                  {Math.round(recommendation.confidence * 100)}%
-                </p>
-              </div>
-
-              <div>
-                <p className="text-sm text-neutral-400">Executable</p>
-                <p className="mt-1 text-xl font-semibold">
-                  {riskCheck.approved ? "Yes" : "No"}
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-6">
-              <p className="text-sm text-neutral-400">Reason</p>
-              <p className="mt-2 text-neutral-200">{recommendation.reason}</p>
-            </div>
-
-            {!riskCheck.approved && (
-              <div className="mt-6 rounded-xl border border-yellow-900 bg-yellow-950/40 p-4">
-                <p className="font-semibold text-yellow-300">
-                  Not executable
-                </p>
-                <ul className="mt-2 list-inside list-disc text-sm text-neutral-300">
-                  {riskCheck.reasons.map((reason) => (
-                    <li key={reason}>{reason}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-          <div className="mt-8 rounded-2xl border border-neutral-800 bg-neutral-900 p-6">
+        {/* Positions and market watch — side by side on large screens,
+            stretched to equal height */}
+        <div className="mt-8 grid gap-6 lg:grid-cols-2">
+          {/* Current positions */}
+          <section className="rounded-2xl border border-neutral-800 bg-neutral-900 p-6">
             <h2 className="mb-4 text-2xl font-bold">Current Positions</h2>
 
             {positions.length === 0 ? (
-              <p className="text-neutral-400">
-                No current paper positions yet.
-              </p>
+              <p className="text-neutral-400">No current paper positions yet.</p>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="max-h-96 overflow-x-auto overflow-y-auto">
                 <table className="w-full text-left text-sm">
-                  <thead className="border-b border-neutral-800 text-neutral-400">
+                  <thead className="sticky top-0 bg-neutral-900 text-neutral-400">
                     <tr>
                       <th className="py-3">Symbol</th>
                       <th className="py-3">Qty</th>
@@ -161,7 +132,10 @@ const riskCheck =
 
                   <tbody>
                     {positions.map((position) => (
-                      <tr key={position.symbol} className="border-b border-neutral-800">
+                      <tr
+                        key={position.symbol}
+                        className="border-b border-neutral-800"
+                      >
                         <td className="py-3 font-semibold">{position.symbol}</td>
                         <td className="py-3">{position.qty}</td>
                         <td className="py-3">
@@ -182,13 +156,15 @@ const riskCheck =
                 </table>
               </div>
             )}
-          </div>
-          <div className="mt-8 rounded-2xl border border-neutral-800 bg-neutral-900 p-6">
+          </section>
+
+          {/* Market watch */}
+          <section className="rounded-2xl border border-neutral-800 bg-neutral-900 p-6">
             <h2 className="mb-4 text-2xl font-bold">Market Watch</h2>
 
-            <div className="overflow-x-auto">
+            <div className="max-h-96 overflow-x-auto overflow-y-auto">
               <table className="w-full text-left text-sm">
-                <thead className="border-b border-neutral-800 text-neutral-400">
+                <thead className="sticky top-0 bg-neutral-900 text-neutral-400">
                   <tr>
                     <th className="py-3">Symbol</th>
                     <th className="py-3">Latest Price</th>
@@ -201,9 +177,7 @@ const riskCheck =
                   {latestTrades.map((trade) => (
                     <tr key={trade.symbol} className="border-b border-neutral-800">
                       <td className="py-3 font-semibold">{trade.symbol}</td>
-                      <td className="py-3">
-                        ${trade.price.toLocaleString()}
-                      </td>
+                      <td className="py-3">${trade.price.toLocaleString()}</td>
                       <td className="py-3">{trade.size}</td>
                       <td className="py-3 text-neutral-400">
                         {trade.timestamp
@@ -215,56 +189,67 @@ const riskCheck =
                 </tbody>
               </table>
             </div>
-          </div>
-          <div className="mt-8 rounded-2xl border border-neutral-800 bg-neutral-900 p-6">
-            <h2 className="mb-4 text-2xl font-bold">Recent Orders</h2>
-
-            {orders.length === 0 ? (
-              <p className="text-neutral-400">No recent paper orders yet.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
-                  <thead className="border-b border-neutral-800 text-neutral-400">
-                    <tr>
-                      <th className="py-3">Symbol</th>
-                      <th className="py-3">Side</th>
-                      <th className="py-3">Qty</th>
-                      <th className="py-3">Status</th>
-                      <th className="py-3">Filled Price</th>
-                      <th className="py-3">Submitted</th>
-                    </tr>
-                  </thead>
-
-                  <tbody>
-                    {orders.map((order) => (
-                      <tr key={order.id} className="border-b border-neutral-800">
-                        <td className="py-3 font-semibold">{order.symbol}</td>
-                        <td className="py-3 uppercase">{order.side}</td>
-                        <td className="py-3">{order.qty}</td>
-                        <td className="py-3">{order.status}</td>
-                        <td className="py-3">
-                          {order.filledAvgPrice
-                            ? `$${Number(order.filledAvgPrice).toLocaleString()}`
-                            : "Not filled"}
-                        </td>
-                        <td className="py-3 text-neutral-400">
-                          {new Date(order.submittedAt).toLocaleString()}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-          <p className="mt-2 text-neutral-300">
-            This app is currently connected to{" "}
-            <strong>
-              {account.paper ? "paper trading" : "live trading"}
-            </strong>
-            .
-          </p>
+          </section>
         </div>
+
+        {/* Recent orders */}
+        <section className="mt-8 rounded-2xl border border-neutral-800 bg-neutral-900 p-6">
+          <h2 className="mb-4 text-2xl font-bold">Recent Orders</h2>
+
+          {orders.length === 0 ? (
+            <p className="text-neutral-400">No recent paper orders yet.</p>
+          ) : (
+            <div className="max-h-96 overflow-x-auto overflow-y-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="sticky top-0 bg-neutral-900 text-neutral-400">
+                  <tr>
+                    <th className="py-3">Symbol</th>
+                    <th className="py-3">Side</th>
+                    <th className="py-3">Qty</th>
+                    <th className="py-3">Status</th>
+                    <th className="py-3">Filled Qty</th>
+                    <th className="py-3">Filled Price</th>
+                    <th className="py-3">Filled At</th>
+                    <th className="py-3">Submitted</th>
+                    <th className="py-3">Closed Reason</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {orders.map((order) => (
+                    <tr key={order.id} className="border-b border-neutral-800">
+                      <td className="py-3 font-semibold">{order.symbol}</td>
+                      <td className="py-3 uppercase">{order.side}</td>
+                      <td className="py-3">{order.qty}</td>
+                      <td className="py-3">{order.status}</td>
+                      <td className="py-3">{order.filledQty}</td>
+                      <td className="py-3">
+                        {order.filledAvgPrice
+                          ? `$${Number(order.filledAvgPrice).toLocaleString()}`
+                          : "Not filled"}
+                      </td>
+                      <td className="py-3 text-neutral-400">
+                        {formatDateTime(order.filledAt)}
+                      </td>
+                      <td className="py-3 text-neutral-400">
+                        {formatDateTime(order.submittedAt)}
+                      </td>
+                      <td className="py-3 text-neutral-400">
+                        {order.expiredAt
+                          ? `Expired ${formatDateTime(order.expiredAt)}`
+                          : order.canceledAt
+                            ? `Canceled ${formatDateTime(order.canceledAt)}`
+                            : order.failedAt
+                              ? `Failed ${formatDateTime(order.failedAt)}`
+                              : "N/A"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
       </div>
     </main>
   );

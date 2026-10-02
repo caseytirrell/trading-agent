@@ -13,15 +13,18 @@ export async function GET() {
       );
     }
 
-    const response = await fetch(`${endpoint}/v2/orders?status=all&limit=10`, {
-      method: "GET",
-      headers: {
-        "APCA-API-KEY-ID": apiKey,
-        "APCA-API-SECRET-KEY": secretKey,
-        "Content-Type": "application/json",
-      },
-      cache: "no-store",
-    });
+    const response = await fetch(
+      `${endpoint}/v2/orders?status=all&limit=50&direction=desc`,
+      {
+        method: "GET",
+        headers: {
+          "APCA-API-KEY-ID": apiKey,
+          "APCA-API-SECRET-KEY": secretKey,
+          "Content-Type": "application/json",
+        },
+        cache: "no-store",
+      }
+    );
 
     const data = await response.json();
 
@@ -36,18 +39,39 @@ export async function GET() {
       );
     }
 
+    type RawOrder = {
+      id: string;
+      symbol: string;
+      qty: string;
+      side: string;
+      type: string;
+      time_in_force: string;
+      status: string;
+      filled_qty: string;
+      filled_avg_price: string | null;
+      submitted_at: string;
+      filled_at: string | null;
+      expired_at: string | null;
+      canceled_at: string | null;
+      failed_at: string | null;
+    };
+
     return NextResponse.json({
-      orders: data.map((order: any) => ({
+      orders: (data as RawOrder[]).map((order) => ({
         id: order.id,
         symbol: order.symbol,
         qty: order.qty,
         side: order.side,
         type: order.type,
+        timeInForce: order.time_in_force,
         status: order.status,
         filledQty: order.filled_qty,
         filledAvgPrice: order.filled_avg_price,
         submittedAt: order.submitted_at,
         filledAt: order.filled_at,
+        expiredAt: order.expired_at,
+        canceledAt: order.canceled_at,
+        failedAt: order.failed_at,
       })),
     });
   } catch (error) {
